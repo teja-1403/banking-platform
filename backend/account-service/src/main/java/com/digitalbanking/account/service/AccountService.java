@@ -2,7 +2,9 @@ package com.digitalbanking.account.service;
 
 import com.digitalbanking.account.dto.AccountResponse;
 import com.digitalbanking.account.dto.CreateAccountRequest;
+import com.digitalbanking.account.dto.FundAccountResponse;
 import com.digitalbanking.account.entity.Account;
+import com.digitalbanking.account.entity.AccountFunding;
 import com.digitalbanking.account.entity.AccountStatus;
 import com.digitalbanking.account.entity.Customer;
 import com.digitalbanking.account.exception.BusinessRuleException;
@@ -11,6 +13,7 @@ import com.digitalbanking.account.repository.AccountRepository;
 import com.digitalbanking.account.repository.CustomerRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.digitalbanking.account.repository.AccountFundingRepository;
 
 import java.math.BigDecimal;
 import java.security.SecureRandom;
@@ -21,15 +24,17 @@ public class AccountService {
 
     private final AccountRepository accountRepository;
     private final CustomerRepository customerRepository;
+    private final AccountFundingRepository accountFundingRepository;
 
     private final SecureRandom secureRandom = new SecureRandom();
 
     public AccountService(
             AccountRepository accountRepository,
-            CustomerRepository customerRepository
-    ) {
+            CustomerRepository customerRepository,
+            AccountFundingRepository accountFundingRepository) {
         this.accountRepository = accountRepository;
         this.customerRepository = customerRepository;
+        this.accountFundingRepository = accountFundingRepository;
     }
 
     @Transactional
@@ -104,6 +109,103 @@ public class AccountService {
         }
 
         return toResponse(account);
+    }
+
+    @Transactional
+    public FundAccountResponse fundAccount(
+            Long userId,
+            Long accountId,
+            BigDecimal amount
+    ) {
+
+        if (amount == null ||
+                amount.compareTo(BigDecimal.ZERO) <= 0) {
+
+            throw new BusinessRuleException(
+                    "Funding amount must be greater than zero"
+            );
+        }
+
+        if (amount.scale() > 2) {
+            throw new BusinessRuleException(
+                    "Funding amount cannot have more than 2 decimal places"
+            );
+        }
+
+        Customer customer = customerRepository.findByUserId(userId)
+                .orElseThrow(() ->
+                        new ResourceNotFoundException(
+                                "Customer profile not found"
+                        )
+                );
+
+        Account account = accountRepository.findByIdForUpdate(accountId)
+                .orElseThrow(() ->
+                        new ResourceNotFoundException(
+                                "Account not found"
+                        )
+                );
+
+        if (!account.getCustomer().getId().equals(customer.getId())) {
+            throw new BusinessRuleException(
+                    "You do not have access to this account"
+            );
+        }
+
+        if (account.getStatus() != AccountStatus.ACTIVE) {
+            throw new BusinessRuleException(
+                    "Only active accounts can be funded"
+            );
+        }
+
+        BigDecimal newBalance =
+                account.getBalance().add(amount);
+
+        account.setBalance(newBalance);
+
+        accountRepository.save(account);
+
+        String fundingReference = generateUniqueFundingReference();
+
+        AccountFunding funding = new AccountFunding();
+
+        funding.setFundingReference(fundingReference);
+        funding.setAccountId(account.getId());
+        funding.setUserId(userId);
+        funding.setAmount(amount);
+        funding.setBalanceAfter(newBalance);
+        funding.setCurrency(account.getCurrency());
+
+        accountFundingRepository.save(funding);
+
+        return new FundAccountResponse(
+                fundingReference,
+                account.getId(),
+                account.getAccountNumber(),
+                amount,
+                newBalance,
+                account.getCurrency()
+        );
+    }
+
+    private String generateUniqueFundingReference() {
+
+        String reference;
+
+        do {
+            reference = "FND-" +
+                    java.util.UUID.randomUUID()
+                            .toString()
+                            .replace("-", "")
+                            .substring(0, 20)
+                            .toUpperCase();
+
+        } while (
+                accountFundingRepository
+                        .existsByFundingReference(reference)
+        );
+
+        return reference;
     }
 
     @Transactional

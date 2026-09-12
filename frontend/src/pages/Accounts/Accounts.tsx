@@ -15,12 +15,13 @@ import {
   InputLabel,
   MenuItem,
   Select,
+  TextField,
   Typography,
 } from "@mui/material";
 
 import { useEffect, useState } from "react";
 
-import { createAccount, getAccounts } from "../../api/accountApi";
+import { createAccount, fundAccount, getAccounts } from "../../api/accountApi";
 
 import { getCurrentCustomer } from "../../api/customerApi";
 
@@ -50,6 +51,18 @@ export default function Accounts() {
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
 
   const [accountError, setAccountError] = useState("");
+
+  const [fundAccountDialogOpen, setFundAccountDialogOpen] = useState(false);
+
+  const [fundingAccount, setFundingAccount] = useState<Account | null>(null);
+
+  const [fundAmount, setFundAmount] = useState("");
+
+  const [isFundingAccount, setIsFundingAccount] = useState(false);
+
+  const [fundingError, setFundingError] = useState("");
+
+  const [fundingSuccess, setFundingSuccess] = useState("");
 
   const loadData = async () => {
     setIsLoading(true);
@@ -94,12 +107,68 @@ export default function Accounts() {
       setAccounts((current) => [...current, createdAccount]);
 
       setAccountDialogOpen(false);
+
+      // Automatically open funding for the newly created account.
+      setFundingAccount(createdAccount);
+      setFundAmount("");
+      setFundingError("");
+      setFundingSuccess("");
+      setFundAccountDialogOpen(true);
     } catch (error) {
       setAccountError(
         getApiErrorMessage(error, "Unable to create the account."),
       );
     } finally {
       setIsCreatingAccount(false);
+    }
+  };
+
+  const handleFundAccount = async () => {
+    setFundingError("");
+    setFundingSuccess("");
+
+    const amount = Number(fundAmount);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setFundingError("Enter a valid funding amount greater than zero.");
+      return;
+    }
+
+    if (!/^\d+(\.\d{1,2})?$/.test(fundAmount)) {
+      setFundingError("Funding amount can have at most 2 decimal places.");
+      return;
+    }
+
+    if (!fundingAccount) {
+      setFundingError("No account selected.");
+      return;
+    }
+
+    setIsFundingAccount(true);
+
+    try {
+      const result = await fundAccount(fundingAccount.id, amount);
+
+      setAccounts((current) =>
+        current.map((account) =>
+          account.id === result.accountId
+            ? {
+                ...account,
+                balance: result.balance,
+              }
+            : account,
+        ),
+      );
+
+      setFundingSuccess(
+        `Funding successful. Reference: ${result.fundingReference}`,
+      );
+
+      setFundAmount("");
+    } catch (error) {
+      setFundingError(getApiErrorMessage(error, "Unable to fund the account."));
+    } finally {
+      setIsFundingAccount(false);
     }
   };
 
@@ -204,6 +273,22 @@ export default function Accounts() {
                 <Typography variant="h5">
                   {account.currency} {account.balance.toFixed(2)}
                 </Typography>
+                <Box sx={{ mt: 2 }}>
+                  <Button
+                    variant="outlined"
+                    fullWidth
+                    disabled={account.status !== "ACTIVE"}
+                    onClick={() => {
+                      setFundingAccount(account);
+                      setFundAmount("");
+                      setFundingError("");
+                      setFundingSuccess("");
+                      setFundAccountDialogOpen(true);
+                    }}
+                  >
+                    Fund Account
+                  </Button>
+                </Box>
               </CardContent>
             </Card>
           </Grid>
@@ -270,6 +355,74 @@ export default function Accounts() {
             disabled={isCreatingAccount}
           >
             {isCreatingAccount ? "Creating..." : "Create Account"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog
+        open={fundAccountDialogOpen}
+        onClose={() => !isFundingAccount && setFundAccountDialogOpen(false)}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>Fund Account</DialogTitle>
+
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Demo funding for portfolio testing. This increases the selected
+            account balance without using a real payment provider.
+          </Typography>
+
+          {fundingAccount && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              {fundingAccount.accountType} — {fundingAccount.accountNumber}
+            </Alert>
+          )}
+
+          {fundingError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {fundingError}
+            </Alert>
+          )}
+
+          {fundingSuccess && (
+            <Alert severity="success" sx={{ mb: 2 }}>
+              {fundingSuccess}
+            </Alert>
+          )}
+
+          <TextField
+            fullWidth
+            autoFocus
+            label="Funding Amount"
+            value={fundAmount}
+            onChange={(event) => setFundAmount(event.target.value)}
+            placeholder="10000.00"
+            type="text"
+            inputMode="decimal"
+            disabled={isFundingAccount}
+            slotProps={{
+              htmlInput: {
+                maxLength: 20,
+              },
+            }}
+            sx={{ mt: 1 }}
+          />
+        </DialogContent>
+
+        <DialogActions>
+          <Button
+            onClick={() => setFundAccountDialogOpen(false)}
+            disabled={isFundingAccount}
+          >
+            Close
+          </Button>
+
+          <Button
+            variant="contained"
+            onClick={() => void handleFundAccount()}
+            disabled={isFundingAccount}
+          >
+            {isFundingAccount ? "Funding..." : "Fund Account"}
           </Button>
         </DialogActions>
       </Dialog>

@@ -4,6 +4,8 @@ import com.digitalbanking.account.dto.AccountResponse;
 import com.digitalbanking.account.dto.CreateAccountRequest;
 import com.digitalbanking.account.security.AuthenticatedUser;
 import com.digitalbanking.account.service.AccountService;
+import com.digitalbanking.account.dto.FundAccountRequest;
+import com.digitalbanking.account.dto.FundAccountResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -69,5 +71,24 @@ public class AccountController {
         return ResponseEntity.ok(
                 accountService.getAccount(userId, accountId)
         );
+    }
+
+    @PostMapping("/{accountId}/fund")
+    public ResponseEntity<FundAccountResponse> fundAccount(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable Long accountId,
+            @Valid @RequestBody FundAccountRequest request
+    ) {
+
+        Long userId = authenticatedUser.getUserId(jwt);
+
+        FundAccountResponse response =
+                accountService.fundAccount(
+                        userId,
+                        accountId,
+                        request.getAmount()
+                );
+
+        return ResponseEntity.ok(response);
     }
 }
