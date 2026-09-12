@@ -8,6 +8,9 @@ import com.digitalbanking.account.entity.AccountType;
 import com.digitalbanking.account.entity.Customer;
 import com.digitalbanking.account.exception.BusinessRuleException;
 import com.digitalbanking.account.exception.ResourceNotFoundException;
+import com.digitalbanking.account.repository.AccountFundingRepository;
+import com.digitalbanking.account.dto.FundAccountResponse;
+import com.digitalbanking.account.entity.AccountFunding;
 import com.digitalbanking.account.repository.AccountRepository;
 import com.digitalbanking.account.repository.CustomerRepository;
 import org.junit.jupiter.api.Test;
@@ -29,6 +32,9 @@ class AccountServiceTest {
 
     @Mock
     private AccountRepository accountRepository;
+
+    @Mock
+    private AccountFundingRepository accountFundingRepository;
 
     @Mock
     private CustomerRepository customerRepository;
@@ -298,5 +304,157 @@ class AccountServiceTest {
         account.setStatus(status);
 
         return account;
+    }
+
+    @Test
+    void shouldFundActiveAccount() {
+
+        Long userId = 1L;
+        Long accountId = 10L;
+
+        Customer customer = new Customer();
+        customer.setId(1L);
+        customer.setUserId(userId);
+
+        Account account = createAccount(
+                accountId,
+                customer,
+                "123456789012",
+                AccountType.SAVINGS,
+                new BigDecimal("5000.00"),
+                AccountStatus.ACTIVE
+        );
+
+        when(customerRepository.findByUserId(userId))
+                .thenReturn(Optional.of(customer));
+
+        when(accountRepository.findByIdForUpdate(accountId))
+                .thenReturn(Optional.of(account));
+
+        when(accountFundingRepository.existsByFundingReference(anyString()))
+                .thenReturn(false);
+
+        AccountFunding savedFunding = new AccountFunding();
+        savedFunding.setId(1L);
+        savedFunding.setFundingReference("FND-TEST");
+        savedFunding.setAccountId(accountId);
+        savedFunding.setUserId(userId);
+        savedFunding.setAmount(new BigDecimal("10000.00"));
+        savedFunding.setBalanceAfter(new BigDecimal("15000.00"));
+        savedFunding.setCurrency("INR");
+
+        when(accountFundingRepository.save(any(AccountFunding.class)))
+                .thenReturn(savedFunding);
+
+        FundAccountResponse response =
+                accountService.fundAccount(
+                        userId,
+                        accountId,
+                        new BigDecimal("10000.00")
+                );
+
+        assertNotNull(response);
+        assertEquals(accountId, response.getAccountId());
+        assertEquals("123456789012", response.getAccountNumber());
+        assertEquals(new BigDecimal("10000.00"), response.getAmount());
+        assertEquals(new BigDecimal("15000.00"), response.getBalance());
+        assertEquals("INR", response.getCurrency());
+
+        assertEquals(
+                new BigDecimal("15000.00"),
+                account.getBalance()
+        );
+
+        verify(customerRepository).findByUserId(userId);
+        verify(accountRepository).findByIdForUpdate(accountId);
+        verify(accountRepository).save(account);
+        verify(accountFundingRepository).save(any(AccountFunding.class));
+    }
+
+    @Test
+    void shouldRejectFundingWhenAmountIsNotPositive() {
+
+        Long userId = 1L;
+        Long accountId = 10L;
+
+        assertThrows(
+                BusinessRuleException.class,
+                () -> accountService.fundAccount(
+                        userId,
+                        accountId,
+                        BigDecimal.ZERO
+                )
+        );
+
+        verifyNoInteractions(
+                customerRepository,
+                accountRepository,
+                accountFundingRepository
+        );
+    }
+
+    @Test
+    void shouldRejectFundingWhenAmountHasMoreThanTwoDecimals() {
+
+        Long userId = 1L;
+        Long accountId = 10L;
+
+        assertThrows(
+                BusinessRuleException.class,
+                () -> accountService.fundAccount(
+                        userId,
+                        accountId,
+                        new BigDecimal("100.123")
+                )
+        );
+
+        verifyNoInteractions(
+                customerRepository,
+                accountRepository,
+                accountFundingRepository
+        );
+    }
+
+    @Test
+    void shouldRejectFundingWhenAccountIsNotActive() {
+
+        Long userId = 1L;
+        Long accountId = 10L;
+
+        Customer customer = new Customer();
+        customer.setId(1L);
+        customer.setUserId(userId);
+
+        Account account = createAccount(
+                accountId,
+                customer,
+                "123456789012",
+                AccountType.SAVINGS,
+                new BigDecimal("5000.00"),
+                AccountStatus.BLOCKED
+        );
+
+        when(customerRepository.findByUserId(userId))
+                .thenReturn(Optional.of(customer));
+
+        when(accountRepository.findByIdForUpdate(accountId))
+                .thenReturn(Optional.of(account));
+
+        assertThrows(
+                BusinessRuleException.class,
+                () -> accountService.fundAccount(
+                        userId,
+                        accountId,
+                        new BigDecimal("1000.00")
+                )
+        );
+
+        assertEquals(
+                new BigDecimal("5000.00"),
+                account.getBalance()
+        );
+
+        verify(accountRepository, never()).save(any(Account.class));
+        verify(accountFundingRepository, never()).save(any(AccountFunding.class));
     }
 }
