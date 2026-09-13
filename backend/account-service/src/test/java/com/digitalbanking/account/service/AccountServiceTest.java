@@ -457,4 +457,84 @@ class AccountServiceTest {
         verify(accountRepository, never()).save(any(Account.class));
         verify(accountFundingRepository, never()).save(any(AccountFunding.class));
     }
+
+    @Test
+    void shouldRejectTransferWhenSourceAccountHasInsufficientBalance() {
+
+        Long userId = 1L;
+        Long sourceAccountId = 1L;
+        Long destinationAccountId = 2L;
+
+        Customer customer = new Customer();
+        customer.setId(1L);
+        customer.setUserId(userId);
+
+        Account sourceAccount = createAccount(
+                sourceAccountId,
+                customer,
+                "123456789012",
+                AccountType.SAVINGS,
+                new BigDecimal("5000.00"),
+                AccountStatus.ACTIVE
+        );
+
+        Customer destinationCustomer = new Customer();
+        destinationCustomer.setId(2L);
+        destinationCustomer.setUserId(2L);
+
+        Account destinationAccount = createAccount(
+                destinationAccountId,
+                destinationCustomer,
+                "987654321098",
+                AccountType.SAVINGS,
+                new BigDecimal("2000.00"),
+                AccountStatus.ACTIVE
+        );
+
+        when(customerRepository.findByUserId(userId))
+                .thenReturn(Optional.of(customer));
+
+        when(accountRepository.findByIdForUpdate(sourceAccountId))
+                .thenReturn(Optional.of(sourceAccount));
+
+        when(accountRepository.findByIdForUpdate(destinationAccountId))
+                .thenReturn(Optional.of(destinationAccount));
+
+        BusinessRuleException exception = assertThrows(
+                BusinessRuleException.class,
+                () -> accountService.executeInternalTransfer(
+                        userId,
+                        sourceAccountId,
+                        destinationAccountId,
+                        new BigDecimal("7000.00")
+                )
+        );
+
+        assertEquals(
+                "Insufficient balance",
+                exception.getMessage()
+        );
+
+        // Neither account should be mutated.
+        assertEquals(
+                new BigDecimal("5000.00"),
+                sourceAccount.getBalance()
+        );
+
+        assertEquals(
+                new BigDecimal("2000.00"),
+                destinationAccount.getBalance()
+        );
+
+        verify(customerRepository).findByUserId(userId);
+
+        verify(accountRepository)
+                .findByIdForUpdate(sourceAccountId);
+
+        verify(accountRepository)
+                .findByIdForUpdate(destinationAccountId);
+
+        verify(accountRepository, never())
+                .save(any(Account.class));
+    }
 }

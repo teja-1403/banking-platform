@@ -432,4 +432,79 @@ class TransactionServiceTest {
 
         return transaction;
     }
+
+    @Test
+    void shouldReturnFailedTransactionResponseWhenAccountServiceRejectsTransfer() {
+
+        Transaction transaction =
+                createTransaction(
+                        5L,
+                        "TXN-TEST-005",
+                        "idem-005",
+                        TransactionStatus.PENDING
+                );
+
+        when(
+                transactionCreationService
+                        .createPendingTransaction(
+                                "idem-005",
+                                request
+                        )
+        ).thenReturn(transaction);
+
+        doThrow(
+                new AccountServiceBusinessException(
+                        "Insufficient balance"
+                )
+        ).when(accountServiceClient)
+                .executeTransfer(
+                        1L,
+                        request
+                );
+
+        BusinessRuleException exception =
+                assertThrows(
+                        BusinessRuleException.class,
+                        () -> transactionService.initiateTransfer(
+                                1L,
+                                "idem-005",
+                                request
+                        )
+                );
+
+        assertEquals(
+                "Insufficient balance",
+                exception.getMessage()
+        );
+
+        assertEquals(
+                TransactionStatus.FAILED,
+                transaction.getStatus()
+        );
+
+        assertNull(transaction.getCompletedAt());
+
+        verify(transactionRepository)
+                .save(transaction);
+
+        verify(auditLogService)
+                .log(
+                        1L,
+                        "TRANSFER_FAILED",
+                        "TXN-TEST-005",
+                        "FAILED",
+                        "Insufficient balance"
+                );
+
+        verify(
+                auditLogService,
+                never()
+        ).log(
+                1L,
+                "TRANSFER_COMPLETED",
+                "TXN-TEST-005",
+                "COMPLETED",
+                "Transfer completed successfully"
+        );
+    }
 }
